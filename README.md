@@ -1,6 +1,5 @@
 ---
 title: DETR Object Detector
-emoji: 🔍
 colorFrom: blue
 colorTo: purple
 sdk: static
