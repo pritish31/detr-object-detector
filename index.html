@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DETR Object Detector</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --border: #e6e8ec; --text: #1f2430;
+    --muted: #6b7280; --accent: #4f46e5; --accent-ink: #fff;
+    --ok: #059669; --err: #dc2626;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117; --card: #161922; --border: #2a2f3a; --text: #e6e8ec;
+      --muted: #99a1b0; --accent: #6366f1; --accent-ink: #fff;
+      --ok: #34d399; --err: #f87171; --shadow: none;
+    }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 30px 20px 44px; }
+  header h1 { margin: 0 0 6px; font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; }
+  header p { margin: 0 0 22px; max-width: 660px; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 5fr 6fr; gap: 18px; align-items: start; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px;
+  }
+  .card-label {
+    font-size: .7rem; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+  }
+
+  #dropzone {
+    display: flex; align-items: center; justify-content: center; min-height: 210px;
+    border: 1.5px dashed var(--border); border-radius: 10px; cursor: pointer;
+    text-align: center; padding: 12px; overflow: hidden;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  #dropzone:hover, #dropzone.drag {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  #dz-empty { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+  #dz-empty strong { color: var(--text); font-size: 1rem; }
+  #preview { max-width: 100%; max-height: 340px; border-radius: 8px; display: block; }
+
+  .ghost {
+    margin-top: 8px; width: 100%; padding: 7px 10px; font: inherit; cursor: pointer;
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .ghost:hover { color: var(--text); border-color: var(--muted); }
+
+  .field { margin-top: 18px; }
+  .field-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .field-row label { font-weight: 600; font-size: .9rem; }
+  .field-row output { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 9px 0 4px; }
+  .field small { color: var(--muted); font-size: .8rem; }
+
+  .primary {
+    margin-top: 18px; width: 100%; padding: 10px 14px; font: inherit; font-weight: 600;
+    color: var(--accent-ink); background: var(--accent);
+    border: 0; border-radius: 8px; cursor: pointer;
+  }
+  .primary:disabled { opacity: .55; cursor: not-allowed; }
+
+  .status { margin-top: 10px; font-size: .85rem; min-height: 1.2em; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .bar { margin-top: 8px; height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s ease; }
+
+  .canvas-hold {
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    min-height: 210px; display: flex; align-items: center; justify-content: center;
+    background:
+      repeating-conic-gradient(color-mix(in srgb, var(--muted) 12%, transparent) 0% 25%, transparent 0% 50%)
+      50% / 22px 22px;
+  }
+  #canvas { max-width: 100%; height: auto; display: block; }
+  #canvas-empty { color: var(--muted); font-size: .9rem; padding: 44px 20px; }
+
+  .summary { margin-top: 12px; font-size: .95rem; }
+  .summary.muted { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .9rem; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; }
+  td:last-child, th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+  footer {
+    margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: .8rem; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>DETR Object Detector</h1>
+    <p>
+      End-to-end object detection with a Transformer &mdash; no anchor boxes,
+      no non-maximum suppression. Drop in a photo and DETR marks every object
+      it recognises across 80 COCO categories. Everything runs in your browser;
+      no image leaves your device.
+    </p>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <div class="card-label">Input</div>
+
+      <label id="dropzone" for="file">
+        <input type="file" id="file" accept="image/*" hidden />
+        <div id="dz-empty">
+          <strong>Drop an image here</strong>
+          <span>or click to browse</span>
+        </div>
+        <img id="preview" alt="" hidden />
+      </label>
+      <button id="example" class="ghost" type="button">Try an example image</button>
+
+      <div class="field">
+        <div class="field-row">
+          <label for="conf">Confidence threshold</label>
+          <output id="confVal">0.70</output>
+        </div>
+        <input type="range" id="conf" min="0.1" max="0.95" step="0.05" value="0.7" />
+        <small>Lower to surface more objects &middot; raise to cut false positives</small>
+      </div>
+
+      <button id="run" class="primary" type="button" disabled>Detect objects</button>
+      <div id="status" class="status"></div>
+      <div id="bar" class="bar" hidden><div id="barFill"></div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-label">Detections</div>
+      <div class="canvas-hold">
+        <canvas id="canvas" hidden></canvas>
+        <div id="canvas-empty">Annotated image will appear here</div>
+      </div>
+      <div id="summary" class="summary muted">Upload an image to begin.</div>
+      <table id="table" hidden>
+        <thead><tr><th>Object</th><th>Confidence</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    Model <b>Xenova/detr-resnet-50</b> (ONNX) &middot; COCO, 80 classes &middot;
+    <a href="https://arxiv.org/abs/2005.12872" target="_blank" rel="noopener">End-to-End Object Detection with Transformers</a>
+    &middot; powered by
+    <a href="https://github.com/huggingface/transformers.js" target="_blank" rel="noopener">Transformers.js</a>
+  </footer>
+</div>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+
+// Always fetch the model from the Hugging Face Hub (and cache it in the browser).
+env.allowLocalModels = false;
+
+const $ = (id) => document.getElementById(id);
+const fileInput = $("file"),
+  dropzone = $("dropzone"),
+  preview = $("preview"),
+  dzEmpty = $("dz-empty"),
+  exampleBtn = $("example"),
+  conf = $("conf"),
+  confVal = $("confVal"),
+  runBtn = $("run"),
+  statusEl = $("status"),
+  bar = $("bar"),
+  barFill = $("barFill"),
+  canvas = $("canvas"),
+  ctx = canvas.getContext("2d"),
+  canvasEmpty = $("canvas-empty"),
+  summary = $("summary"),
+  table = $("table"),
+  tbody = table.querySelector("tbody");
+
+const EXAMPLE_URL =
+  "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/cats.jpg";
+const MAX_CANVAS_DIM = 1600; // cap huge photos so mobile canvases stay light
+
+let currentImage = null;   // decoded HTMLImageElement
+let currentSrc = null;      // src string handed to the model
+let allDetections = [];     // full result at a low threshold; filtered client-side
+let detectorPromise = null;
+
+function setStatus(msg, kind = "") {
+  statusEl.textContent = msg;
+  statusEl.className = "status " + kind;
+}
+
+// Deterministic, visually distinct colour per label (golden-ratio hue spacing).
+function colorFor(label) {
+  let h = 0;
+  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
+  const hue = ((Math.abs(h) * 0.61803398875) % 1) * 360;
+  return `hsl(${hue.toFixed(0)} 70% 45%)`;
+}
+
+function getDetector() {
+  if (!detectorPromise) {
+    bar.hidden = false;
+    setStatus("Loading model — first visit downloads ~40 MB, then it's cached…");
+    detectorPromise = pipeline("object-detection", "Xenova/detr-resnet-50", {
+      progress_callback: (p) => {
+        if (p.status === "progress" && typeof p.progress === "number") {
+          barFill.style.width = Math.min(100, p.progress).toFixed(1) + "%";
+        }
+      },
+    })
+      .then((d) => {
+        bar.hidden = true;
+        barFill.style.width = "0%";
+        setStatus("Model ready.", "ok");
+        return d;
+      })
+      .catch((err) => {
+        detectorPromise = null;
+        bar.hidden = true;
+        setStatus("Failed to load model: " + err.message, "err");
+        throw err;
+      });
+  }
+  return detectorPromise;
+}
+
+function loadImage(src, crossOrigin) {
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    if (crossOrigin) im.crossOrigin = crossOrigin;
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error("could not decode image"));
+    im.src = src;
+  });
+}
+
+async function setImage(src, crossOrigin) {
+  currentImage = await loadImage(src, crossOrigin);
+  currentSrc = src;
+  preview.src = src;
+  preview.hidden = false;
+  dzEmpty.hidden = true;
+  runBtn.disabled = false;
+  allDetections = [];
+
+  drawBase();
+  canvas.hidden = false;
+  canvasEmpty.hidden = true;
+  summary.textContent = 'Press "Detect objects".';
+  summary.className = "summary muted";
+  table.hidden = true;
+  tbody.innerHTML = "";
+}
+
+function drawBase() {
+  if (!currentImage) return;
+  const iw = currentImage.naturalWidth || currentImage.width;
+  const ih = currentImage.naturalHeight || currentImage.height;
+  const scale = Math.min(1, MAX_CANVAS_DIM / Math.max(iw, ih));
+  canvas.width = Math.round(iw * scale);
+  canvas.height = Math.round(ih * scale);
+  ctx.drawImage(currentImage, 0, 0, canvas.width, canvas.height);
+}
+
+function render() {
+  if (!currentImage) return;
+  const t = parseFloat(conf.value);
+  const dets = allDetections
+    .filter((d) => d.score >= t)
+    .sort((a, b) => b.score - a.score);
+
+  drawBase();
+  const lw = Math.max(2, Math.round(canvas.width / 400));
+  const fs = Math.max(12, Math.round(canvas.width / 45));
+  ctx.lineWidth = lw;
+  ctx.font = `600 ${fs}px system-ui, sans-serif`;
+  ctx.textBaseline = "top";
+
+  for (const { score, label, box } of dets) {
+    const x = box.xmin * canvas.width;
+    const y = box.ymin * canvas.height;
+    const w = (box.xmax - box.xmin) * canvas.width;
+    const h = (box.ymax - box.ymin) * canvas.height;
+    const c = colorFor(label);
+
+    ctx.strokeStyle = c;
+    ctx.strokeRect(x, y, w, h);
+
+    const tag = `${label} ${(score * 100).toFixed(0)}%`;
+    const tw = ctx.measureText(tag).width;
+    const ty = Math.max(0, y - fs - 6);
+    ctx.fillStyle = c;
+    ctx.fillRect(x - lw / 2, ty, tw + 10, fs + 6);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(tag, x + 5 - lw / 2, ty + 3);
+  }
+
+  if (!dets.length) {
+    summary.textContent = allDetections.length
+      ? "No objects above this threshold — lower the slider."
+      : "No objects found.";
+    summary.className = "summary muted";
+    table.hidden = true;
+    return;
+  }
+
+  const counts = {};
+  for (const d of dets) counts[d.label] = (counts[d.label] || 0) + 1;
+  const parts = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([l, n]) => `${n}× ${l}`);
+  summary.innerHTML =
+    `<b>${dets.length} object${dets.length !== 1 ? "s" : ""} detected</b> — ` +
+    parts.join(" · ");
+  summary.className = "summary";
+
+  tbody.innerHTML = dets
+    .map((d) => `<tr><td>${d.label}</td><td>${(d.score * 100).toFixed(1)}%</td></tr>`)
+    .join("");
+  table.hidden = false;
+}
+
+async function runDetection() {
+  if (!currentSrc) return;
+  try {
+    runBtn.disabled = true;
+    const model = await getDetector();
+    setStatus("Detecting…");
+    const t0 = performance.now();
+    const out = await model(currentSrc, { threshold: 0.05, percentage: true });
+    allDetections = Array.isArray(out) ? out : [];
+    render();
+    setStatus(`Done in ${((performance.now() - t0) / 1000).toFixed(1)} s.`, "ok");
+  } catch (err) {
+    console.error(err);
+    setStatus("Error: " + err.message, "err");
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+function readFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const reader = new FileReader();
+  reader.onload = () => setImage(reader.result).catch((e) => setStatus(e.message, "err"));
+  reader.readAsDataURL(file);
+}
+
+conf.addEventListener("input", () => {
+  confVal.textContent = parseFloat(conf.value).toFixed(2);
+  render();
+});
+runBtn.addEventListener("click", runDetection);
+fileInput.addEventListener("change", () => readFile(fileInput.files[0]));
+
+["dragover", "dragenter"].forEach((ev) =>
+  dropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropzone.classList.add("drag");
+  })
+);
+["dragleave", "drop"].forEach((ev) =>
+  dropzone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("drag");
+  })
+);
+dropzone.addEventListener("drop", (e) => readFile(e.dataTransfer.files[0]));
+
+exampleBtn.addEventListener("click", async () => {
+  try {
+    setStatus("Loading example…");
+    await setImage(EXAMPLE_URL, "anonymous");
+    setStatus("");
+    runDetection();
+  } catch (e) {
+    setStatus("Could not load example: " + e.message, "err");
+  }
+});
+
+// Warm the model in the background so the first detection is quick.
+getDetector().catch(() => {});
+</script>
+</body>
+</html>
